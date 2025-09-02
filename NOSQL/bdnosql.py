@@ -1,7 +1,6 @@
 import sys
 from pymongo import MongoClient
 from pymongo.errors import ConnectionFailure
-from bson.objectid import ObjectId
 import os
 from dotenv import load_dotenv
 
@@ -16,108 +15,215 @@ class MongoManager:
             self.cliente = MongoClient(uri)
             self.cliente.admin.command('ping')
             self.banco = self.cliente.sistema
-            print("Conectou")
+            print("Conectado ao MongoDB com sucesso!")
         except ConnectionFailure:
-            print("Erro", file=sys.stderr)
+            print("Erro: Não foi possível conectar ao MongoDB", file=sys.stderr)
             sys.exit(1)
 
     def fechar_conexao(self):
         if self.cliente:
             self.cliente.close()
-            print("Fechou")
+            print("Conexão fechada")
+
+    def get_next_sequence(self, collection_name):
+        """Obtém o próximo ID sequencial para uma coleção"""
+        try:
+            counter = self.banco.counters.find_one_and_update(
+                {'_id': collection_name},
+                {'$inc': {'seq': 1}},
+                upsert=True,
+                return_document=True
+            )
+            return counter['seq']
+        except Exception as e:
+            print(f"Erro ao obter próximo ID sequencial: {e}")
+            return None
 
     def criar_usuario(self, cpf, nome, email):
         try:
             self.banco.usuarios.insert_one({"_id": cpf, "nome": nome, "email": email})
-            print("Criou")
-        except Exception:
-            print("Erro")
+            print("Usuário criado com sucesso!")
+        except Exception as e:
+            print(f"Erro ao criar usuário: {e}")
 
     def ler_usuarios(self):
-        for usuario in self.banco.usuarios.find():
-            print(f"CPF: {usuario.get('_id')}, Nome: {usuario.get('nome')}, Email: {usuario.get('email')}")
+        try:
+            usuarios = list(self.banco.usuarios.find())
+            if not usuarios:
+                print("Nenhum usuário cadastrado.")
+                return
+                
+            for usuario in usuarios:
+                print(f"CPF: {usuario.get('_id')}, Nome: {usuario.get('nome')}, Email: {usuario.get('email')}")
+        except Exception as e:
+            print(f"Erro ao ler usuários: {e}")
 
     def atualizar_usuario(self, cpf, novo_nome, novo_email):
-        aux = {}
-        if novo_nome:
-            aux['nome'] = novo_nome
-        if novo_email:
-            aux['email'] = novo_email
-        if not aux:
-            print("Nenhuma alteracao")
-            return
-        result = self.banco.usuarios.update_one({"_id": cpf}, {"$set": aux})
-        if result.matched_count == 0:
-            print("Nao achou")
-        elif result.modified_count > 0:
-            print("Atualizou")
-        else:
-            print("Nenhuma alteracao")
+        try:
+            aux = {}
+            if novo_nome:
+                aux['nome'] = novo_nome
+            if novo_email:
+                aux['email'] = novo_email
+            if not aux:
+                print("Nenhuma alteração informada")
+                return
+                
+            result = self.banco.usuarios.update_one({"_id": cpf}, {"$set": aux})
+            if result.matched_count == 0:
+                print("Usuário não encontrado.")
+            elif result.modified_count > 0:
+                print("Usuário atualizado com sucesso!")
+            else:
+                print("Nenhuma alteração realizada.")
+        except Exception as e:
+            print(f"Erro ao atualizar usuário: {e}")
 
     def deletar_usuario(self, cpf):
-        result = self.banco.usuarios.delete_one({"_id": cpf})
-        if result.deleted_count == 0:
-            print("Nao achou")
-        else:
-            print("Deletou")
+        try:
+            result = self.banco.usuarios.delete_one({"_id": cpf})
+            if result.deleted_count == 0:
+                print("Usuário não encontrado.")
+            else:
+                print("Usuário deletado com sucesso!")
+        except Exception as e:
+            print(f"Erro ao deletar usuário: {e}")
 
     def criar_produto(self, nome, valor, quantidade):
         try:
-            result = self.banco.produtos.insert_one({"nome": nome, "valor": valor, "quantidade": quantidade})
-            print("Criou")
-            return result.inserted_id
-        except Exception:
-            print("Erro")
+            # Obter o próximo ID sequencial
+            id_produto = self.get_next_sequence('produtos')
+            if id_produto is None:
+                print("Erro ao gerar ID para o produto")
+                return None
+                
+            valor = float(valor)
+            quantidade = int(quantidade)
+            
+            result = self.banco.produtos.insert_one({
+                "_id": id_produto,
+                "nome": nome, 
+                "valor": valor, 
+                "quantidade": quantidade
+            })
+            print("Produto criado com sucesso!")
+            return id_produto
+        except ValueError:
+            print("Erro: Valor ou quantidade inválidos. Certifique-se de usar números.")
+            return None
+        except Exception as e:
+            print(f"Erro ao criar produto: {e}")
             return None
     
     def ler_produtos(self):
-        for produto in self.banco.produtos.find():
-            print(f"ID: {produto.get('_id')}, Nome: {produto.get('nome')}, Valor: {produto.get('valor')}")
+        try:
+            produtos = list(self.banco.produtos.find())
+            if not produtos:
+                print("Nenhum produto cadastrado.")
+                return
+                
+            for produto in produtos:
+                print(f"ID: {produto.get('_id')}, Nome: {produto.get('nome')}, Valor: R${produto.get('valor'):.2f}, Quantidade: {produto.get('quantidade')}")
+        except Exception as e:
+            print(f"Erro ao ler produtos: {e}")
 
     def atualizar_produto(self, id_produto, novo_valor):
-        result = self.banco.produtos.update_one({"_id": ObjectId(id_produto)}, {"$set": {"valor": novo_valor}})
-        if result.matched_count == 0:
-            print("Nao achou")
-        else:
-            print("Atualizou")
+        try:
+            # Converter para inteiro
+            id_produto = int(id_produto)
+            result = self.banco.produtos.update_one(
+                {"_id": id_produto},
+                {"$set": {"valor": float(novo_valor)}}
+            )
+            if result.matched_count == 0:
+                print("Produto não encontrado.")
+            else:
+                print("Produto atualizado com sucesso.")
+        except ValueError:
+            print("ID do produto inválido. Deve ser um número inteiro.")
+        except Exception as e:
+            print(f"Erro ao atualizar produto: {e}")
             
     def deletar_produto(self, id_produto):
-        result = self.banco.produtos.delete_one({"_id": ObjectId(id_produto)})
-        if result.deleted_count == 0:
-            print("Nao achou")
-        else:
-            print("Deletou")
+        try:
+            # Converter para inteiro
+            id_produto = int(id_produto)
+            result = self.banco.produtos.delete_one({"_id": id_produto})
+            if result.deleted_count == 0:
+                print("Produto não encontrado.")
+            else:
+                print("Produto deletado com sucesso.")
+        except ValueError:
+            print("ID do produto inválido. Deve ser um número inteiro.")
+        except Exception as e:
+            print(f"Erro ao deletar produto: {e}")
 
     def criar_endereco(self, rua, numero, bairro, cidade, cep, complemento):
         try:
-            documento = {"rua": rua, "numero": numero, "bairro": bairro, "cidade": cidade, "cep": cep, "complemento": complemento}
+            # Obter o próximo ID sequencial
+            id_endereco = self.get_next_sequence('enderecos')
+            if id_endereco is None:
+                print("Erro ao gerar ID para o endereço")
+                return None
+                
+            documento = {
+                "_id": id_endereco,
+                "rua": rua, 
+                "numero": numero, 
+                "bairro": bairro, 
+                "cidade": cidade, 
+                "cep": cep, 
+                "complemento": complemento
+            }
             result = self.banco.enderecos.insert_one(documento)
-            print("Criou")
-            return result.inserted_id
-        except Exception:
-            print("Erro")
+            print("Endereço criado com sucesso!")
+            return id_endereco
+        except Exception as e:
+            print(f"Erro ao criar endereço: {e}")
             return None
 
     def ler_enderecos(self):
-        for end in self.banco.enderecos.find():
-            print(f"ID: {end.get('_id')}, Rua: {end.get('rua')}, N°: {end.get('numero')}, Cidade: {end.get('cidade')}")
+        try:
+            enderecos = list(self.banco.enderecos.find())
+            if not enderecos:
+                print("Nenhum endereço cadastrado.")
+                return
+                
+            for end in enderecos:
+                print(f"ID: {end.get('_id')}, Rua: {end.get('rua')}, N°: {end.get('numero')}, Bairro: {end.get('bairro')}, Cidade: {end.get('cidade')}")
+        except Exception as e:
+            print(f"Erro ao ler endereços: {e}")
 
     def atualizar_endereco(self, id_endereco, nova_rua, novo_numero):
-        result = self.banco.enderecos.update_one(
-            {"_id": ObjectId(id_endereco)},
-            {"$set": {"rua": nova_rua, "numero": novo_numero}}
-        )
-        if result.matched_count == 0:
-            print("Nao achou")
-        else:
-            print("Atualizou")
+        try:
+            # Converter para inteiro
+            id_endereco = int(id_endereco)
+            result = self.banco.enderecos.update_one(
+                {"_id": id_endereco},
+                {"$set": {"rua": nova_rua, "numero": novo_numero}}
+            )
+            if result.matched_count == 0:
+                print("Endereço não encontrado.")
+            else:
+                print("Endereço atualizado com sucesso.")
+        except ValueError:
+            print("ID do endereço inválido. Deve ser um número inteiro.")
+        except Exception as e:
+            print(f"Erro ao atualizar endereço: {e}")
 
     def deletar_endereco(self, id_endereco):
-        result = self.banco.enderecos.delete_one({"_id": ObjectId(id_endereco)})
-        if result.deleted_count == 0:
-            print("Nao achou")
-        else:
-            print("Deletou")
+        try:
+            # Converter para inteiro
+            id_endereco = int(id_endereco)
+            result = self.banco.enderecos.delete_one({"_id": id_endereco})
+            if result.deleted_count == 0:
+                print("Endereço não encontrado.")
+            else:
+                print("Endereço deletado com sucesso.")
+        except ValueError:
+            print("ID do endereço inválido. Deve ser um número inteiro.")
+        except Exception as e:
+            print(f"Erro ao deletar endereço: {e}")
 
 # Menus foram gerados com auxílio de IA para ficarem mais bonitos e de fácil usabilidade
 def menu_endereco(mongo_manager):
@@ -141,13 +247,19 @@ def menu_endereco(mongo_manager):
         elif opcao == '2':
             mongo_manager.ler_enderecos()
         elif opcao == '3':
-            id_end = input("ID do endereço a atualizar: ")
-            nova_rua = input("Nova rua: ")
-            novo_num = int(input("Novo número: "))
-            mongo_manager.atualizar_endereco(id_end, nova_rua, novo_num)
+            try:
+                id_end = int(input("ID do endereço a atualizar: "))
+                nova_rua = input("Nova rua: ")
+                novo_num = int(input("Novo número: "))
+                mongo_manager.atualizar_endereco(id_end, nova_rua, novo_num)
+            except ValueError:
+                print("ID do endereço deve ser um número inteiro.")
         elif opcao == '4':
-            id_end = input("ID do endereço a deletar: ")
-            mongo_manager.deletar_endereco(id_end)
+            try:
+                id_end = int(input("ID do endereço a deletar: "))
+                mongo_manager.deletar_endereco(id_end)
+            except ValueError:
+                print("ID do endereço deve ser um número inteiro.")
         elif opcao == '5':
             break
         else:
@@ -201,12 +313,18 @@ def menu_produto(mongo_manager):
         elif opcao == '2':
             mongo_manager.ler_produtos()
         elif opcao == '3':
-            id_produto = input("ID do produto a atualizar: ")
-            novo_valor = float(input("Novo valor: "))
-            mongo_manager.atualizar_produto(id_produto, novo_valor)
+            try:
+                id_produto = int(input("ID do produto a atualizar: "))
+                novo_valor = float(input("Novo valor: "))
+                mongo_manager.atualizar_produto(id_produto, novo_valor)
+            except ValueError:
+                print("ID do produto deve ser um número inteiro.")
         elif opcao == '4':
-            id_produto = input("ID do produto a deletar: ")
-            mongo_manager.deletar_produto(id_produto)
+            try:
+                id_produto = int(input("ID do produto a deletar: "))
+                mongo_manager.deletar_produto(id_produto)
+            except ValueError:
+                print("ID do produto deve ser um número inteiro.")
         elif opcao == '5':
             break
         else:
@@ -237,10 +355,12 @@ def main():
     try:
         mongo_manager = MongoManager(MONGO_URI)
         menu_mongo(mongo_manager)
+    except Exception as e:
+        print(f"Erro inesperado: {e}")
     finally:
         if mongo_manager:
             mongo_manager.fechar_conexao()
-    print("Fechou")
+    print("Programa encerrado")
 
 if __name__ == "__main__":
     main()
